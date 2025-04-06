@@ -1,8 +1,6 @@
 package org.kuzne;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class LocalSearch {
     private static final int CORE_NUMBER = 2;
@@ -22,12 +20,91 @@ public class LocalSearch {
      * 4. double jobs[][]. Массив n массивов, где n - число ядер. 
      * Каждый массив содержит номера работ в порядке их выполнения на процессоре.
      * Число -1 в массиве означает пустую работу, которая заканчивается в ближайшей точке событий.
+     *
+     * 5.double jobsSlowdown[][]. Массив n массивов, где n - число ядер.
+     * Значение jobsSlowdown[i][j] - насколько замедляется i-тая работа при параллельной работе с j.
      */
 
     public static List<Integer> localSearch(Map<Integer, Integer> jobs_orig, List<Integer> D, double[][] order, Map<Integer, Integer[]> configs) {
-        List<Integer> newD = List.copyOf(D);
+        List<Integer> curOpt = new ArrayList<>(D);
+        double curOptValue = evaluateSchedule(curOpt, jobs_orig, order, configs);
+        List<Integer> bestNeighbor = null;
+        double bestNeighborValue;
 
-        return newD;
+        boolean improved;
+        do {
+            improved = false;
+            List<List<Integer>> neighbors = generateNeighbors(curOpt, configs, order);
+
+            for (List<Integer> neighbor : neighbors) {
+                bestNeighborValue = evaluateSchedule(neighbor, jobs_orig, order, configs);
+
+                if (bestNeighborValue < curOptValue) {
+                    curOpt = new ArrayList<>(neighbor);
+                    curOptValue = bestNeighborValue;
+                    improved = true;
+                    break; // Переход к следующей итерации
+                }
+            }
+        } while (improved);
+
+        return curOpt;
+    }
+
+    private static List<List<Integer>> generateNeighbors(List<Integer> D, Map<Integer, Integer[]> configs, double[][] order) {
+        List<List<Integer>> neighbors = new ArrayList<>();
+
+        for (int i = 0; i < D.size(); i++) {
+            int currentConfig = D.get(i);
+
+            for (int newConfig : configs.keySet()) {
+                if (newConfig != currentConfig) {
+                    List<Integer> newD = new ArrayList<>(D);
+                    newD.set(i, newConfig);
+
+                    if (isValidSchedule(newD, order, configs)) {
+                        neighbors.add(newD);
+                    }
+                }
+            }
+        }
+        return neighbors;
+    }
+
+    private static boolean isValidSchedule(List<Integer> D, double[][] order, Map<Integer, Integer[]> configs) {
+        // Построим карту <работа, время ее начала в D>
+        Map<Integer, Integer> jobStartTimes = new HashMap<>();
+
+        for (int time = 0; time < D.size(); time++) {
+            Integer[] jobsInConfig = configs.get(D.get(time));
+            if (jobsInConfig != null) {
+                for (int job : jobsInConfig) {
+                    jobStartTimes.putIfAbsent(job, time);
+                }
+            }
+        }
+
+        // Проверим, что порядок выполнения соблюдается
+        for (double[] dependency : order) {
+            int jobA = (int) dependency[0];
+            int jobB = (int) dependency[1];
+
+            Integer startA = jobStartTimes.get(jobA);
+            Integer startB = jobStartTimes.get(jobB);
+
+            if (startA == null || startB == null || startA >= startB) {
+                return false; // Нарушение частичного порядка
+            }
+        }
+
+        return true;
+    }
+
+    private static double evaluateSchedule(List<Integer> D, Map<Integer, Integer> jobs_orig, double[][] order, Map<Integer, Integer[]> configs) {
+        // Здесь должен быть вызов GAMS и обработка его результата.
+        // Например, можно записать D в файл, запустить GAMS, считать результат.
+        // Пока заглушка:
+        return Math.random() * 1000; // Имитация оценки расписания
     }
 
     public static List<List<Integer>> dToJobs(Map<Integer, Integer> jobs_orig, List<Integer> D, Map<Integer, Integer[]> configs) {
@@ -76,46 +153,97 @@ public class LocalSearch {
         return jobsOnCores;
     }
 
-    public static List<Integer> jobsOnCoresToD(Map<Integer, Integer> jobs_orig, List<List<Integer>> jobsOnCores, Map<Integer, Integer[]> configs) {
+    public static List<Integer> jobsOnCoresToD(
+            Map<Integer, Integer> jobs_orig,
+            List<List<Integer>> jobsOnCores,
+            double[][] jobsSlowdown,
+            Map<Integer, Integer[]> configs
+    ) {
         List<Integer> D = new ArrayList<>();
-        int core1Index = 0, core2Index = 0;
-    
-        // Iterate through the jobsOnCores lists
-        while (core1Index < jobsOnCores.get(0).size() || core2Index < jobsOnCores.get(1).size()) {
-            int core1Job = (core1Index < jobsOnCores.get(0).size()) ? jobsOnCores.get(0).get(core1Index) : -1;
-            int core2Job = (core2Index < jobsOnCores.get(1).size()) ? jobsOnCores.get(1).get(core2Index) : -1;
-    
-            // Find the configuration that matches the current jobs on cores
-            boolean configFound = false;
-            for (Map.Entry<Integer, Integer[]> entry : configs.entrySet()) {
-                Integer[] configJobs = entry.getValue();
-                if (configJobs.length == 2) {
-                    if ((configJobs[0] == core1Job && configJobs[1] == core2Job) ||
-                        (configJobs[0] == core2Job && configJobs[1] == core1Job)) {
-                        D.add(entry.getKey());
-                        configFound = true;
-                        break;
+
+        int[] taskIndices = new int[]{0, 0};
+        double[] remainingTimes = new double[2];
+        Integer[] currentTasks = new Integer[]{
+                jobsOnCores.get(0).get(0),
+                jobsOnCores.get(1).get(0)
+        };
+
+        // Начальные значения оставшегося времени
+        for (int core = 0; core < 2; core++) {
+            int task = currentTasks[core];
+            if (task != -1) {
+                int other = currentTasks[1 - core];
+                double slowdown = (other != -1) ? jobsSlowdown[task][other] : 1.0;
+                remainingTimes[core] = jobs_orig.get(task) / slowdown;
+            } else {
+                remainingTimes[core] = 0;
+            }
+        }
+
+        while (taskIndices[0] < jobsOnCores.get(0).size() || taskIndices[1] < jobsOnCores.get(1).size()) {
+            Integer[] config = new Integer[2];
+            config[0] = currentTasks[0];
+            config[1] = currentTasks[1];
+
+            double minTime = Double.MAX_VALUE;
+            for (double rt : remainingTimes) {
+                if (rt > 0 && rt < minTime) {
+                    minTime = rt;
+                }
+            }
+
+            int configId = findMatchingConfig(config, configs);
+            D.add(configId);
+
+            for (int i = 0; i < 2; i++) {
+                if (remainingTimes[i] > 0) {
+                    remainingTimes[i] -= minTime;
+                }
+            }
+
+            for (int core = 0; core < 2; core++) {
+                if (remainingTimes[core] <= 1e-6) {
+                    taskIndices[core]++;
+                    if (taskIndices[core] < jobsOnCores.get(core).size()) {
+                        currentTasks[core] = jobsOnCores.get(core).get(taskIndices[core]);
+                    } else {
+                        currentTasks[core] = -1;
                     }
-                } else if (configJobs.length == 1) {
-                    if ((configJobs[0] == core1Job && core2Job == -1) ||
-                        (configJobs[0] == core2Job && core1Job == -1)) {
-                        D.add(entry.getKey());
-                        configFound = true;
-                        break;
+
+                    int task = currentTasks[core];
+                    if (task != -1) {
+                        int other = currentTasks[1 - core];
+                        double slowdown = (other != -1) ? jobsSlowdown[task][other] : 1.0;
+                        remainingTimes[core] = jobs_orig.get(task) / slowdown;
+                    } else {
+                        remainingTimes[core] = 0;
+                    }
+
+                    int other = 1 - core;
+                    int otherTask = currentTasks[other];
+                    if (otherTask != -1 && remainingTimes[other] > 0) {
+                        double slowdown = (currentTasks[core] != -1) ? jobsSlowdown[otherTask][currentTasks[core]] : 1.0;
+                        remainingTimes[other] = jobs_orig.get(otherTask) / slowdown;
                     }
                 }
             }
-    
-            // If no matching configuration is found, add 0 to D (indicating no configuration)
-            if (!configFound) {
-                D.add(0);
-            }
-    
-            // Move to the next jobs on cores
-            if (core1Index < jobsOnCores.get(0).size()) core1Index++;
-            if (core2Index < jobsOnCores.get(1).size()) core2Index++;
         }
-    
+
         return D;
+    }
+
+    private static int findMatchingConfig(Integer[] config, Map<Integer, Integer[]> configs) {
+        List<Integer> configList =  new ArrayList<>();
+        for (int task : config) {
+            if (task != -1) configList.add(task);
+        }
+
+        for (Map.Entry<Integer, Integer[]> entry : configs.entrySet()) {
+            List<Integer> jobs = Arrays.asList(entry.getValue());
+            if (jobs.size() == configList.size() && jobs.containsAll(configList)) {
+                return entry.getKey();
+            }
+        }
+        return 0; // Пустая конфигурация
     }
 }
