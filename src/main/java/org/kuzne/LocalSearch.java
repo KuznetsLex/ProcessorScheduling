@@ -1,5 +1,18 @@
 package org.kuzne;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.*;
 
 public class LocalSearch {
@@ -24,7 +37,42 @@ public class LocalSearch {
      * 5.double jobsSlowdown[][]. Массив n массивов, где n - число ядер.
      * Значение jobsSlowdown[i][j] - насколько замедляется i-тая работа при параллельной работе с j.
      */
+    public static void main(String[] args) throws IOException {
+        Map<Integer, Integer> jobs_orig = new HashMap<>();
+        jobs_orig.put(0, 9951);
+        jobs_orig.put(1, 13206);
+        jobs_orig.put(2, 3831);
+        jobs_orig.put(3, 4209);
 
+        double[][] jobsSlowdown = { {1, 0.97, 0, 0.87}, {0.98, 1, 0.96, 0}, {0, 0.93, 1, 0.6}, {0.9, 0, 0.75, 1}};
+
+        Map<Integer, Integer[]> configs = new HashMap<>();
+        configs.put(1, new Integer[]{0});
+        configs.put(2, new Integer[]{1});
+        configs.put(3, new Integer[]{2});
+        configs.put(4, new Integer[]{3});
+        configs.put(5, new Integer[]{0, 1});
+        configs.put(6, new Integer[]{0, 3});
+        configs.put(7, new Integer[]{1, 2});
+        configs.put(8, new Integer[]{2, 3});
+
+        double[][] order = new double[][] {{2, 0}, {3, 1}};
+
+        List<Path> paths = Files.walk(Paths.get("input")).collect(Collectors.toList());
+        paths.removeFirst();
+
+        List<ProblemInstance> problemInstances = paths.stream()
+                .map(InstanceReader::readInstance)
+                .toList();
+
+        for (ProblemInstance problemInstance : problemInstances) {
+            List<List<Integer>> result = GreedyAlgorithm.buildSchedule(problemInstance);
+            List<List<Integer>> jobs = scheduleToJobs(result);
+            List<Integer> D = jobsOnCoresToD(jobs_orig, jobs, jobsSlowdown, configs);
+            List<Integer> locSearch = localSearch(jobs_orig, D, order, configs);
+            System.out.println(locSearch);
+        }
+    }
     public static List<Integer> localSearch(Map<Integer, Integer> jobs_orig, List<Integer> D, double[][] order, Map<Integer, Integer[]> configs) {
         List<Integer> curOpt = new ArrayList<>(D);
         double curOptValue = evaluateSchedule(curOpt, jobs_orig, order, configs);
@@ -72,7 +120,7 @@ public class LocalSearch {
     }
 
     private static boolean isValidSchedule(List<Integer> D, double[][] order, Map<Integer, Integer[]> configs) {
-        // Построим карту <работа, время ее начала в D>
+        // Построим отображение <работа, время ее начала в D>
         Map<Integer, Integer> jobStartTimes = new HashMap<>();
 
         for (int time = 0; time < D.size(); time++) {
@@ -104,37 +152,80 @@ public class LocalSearch {
         // Здесь должен быть вызов GAMS и обработка его результата.
         // Например, можно записать D в файл, запустить GAMS, считать результат.
         // Пока заглушка:
-        return Math.random() * 1000; // Имитация оценки расписания
+        double eval = Math.random() * 1000; // Имитация оценки расписания
+        System.out.println(eval);
+        return eval;
+
+    }
+
+    /*scheduleToJobs для 2-ух ядер*/
+    public static List<List<Integer>> scheduleToJobs(List<List<Integer>> schedule) {
+        List<List<Integer>> jobsOnCores = new ArrayList<>();
+        jobsOnCores.add(new ArrayList<>());
+        jobsOnCores.add(new ArrayList<>());
+        for(List<Integer> eventpoint: schedule) {
+            if (eventpoint.size() == 1) {
+                if (jobsOnCores.get(0).contains(eventpoint.get(0))) {
+                    jobsOnCores.get(1).add(-1);
+                }
+                else if(jobsOnCores.get(1).contains(eventpoint.get(0))) {
+                    jobsOnCores.get(0).add(-1);
+                }
+                else {
+                    jobsOnCores.get(0).add(eventpoint.get(0));
+                    jobsOnCores.get(1).add(-1);
+                }
+            }
+            else {
+                if (jobsOnCores.get(0).contains(eventpoint.get(0))) {
+                    jobsOnCores.get(1).add(eventpoint.get(1));
+                }
+                else if (jobsOnCores.get(1).contains(eventpoint.get(0))) {
+                    jobsOnCores.get(0).add(eventpoint.get(1));
+                }
+                else if (jobsOnCores.get(0).contains(eventpoint.get(1))) {
+                    jobsOnCores.get(1).add(eventpoint.get(0));
+                }
+                else if (jobsOnCores.get(1).contains(eventpoint.get(1))) {
+                    jobsOnCores.get(0).add(eventpoint.get(0));
+                }
+                else {
+                    jobsOnCores.get(0).add(eventpoint.get(0));
+                    jobsOnCores.get(1).add(eventpoint.get(1));
+                }
+            }
+        }
+        return jobsOnCores;
     }
 
     public static List<List<Integer>> dToJobs(Map<Integer, Integer> jobs_orig, List<Integer> D, Map<Integer, Integer[]> configs) {
         List<List<Integer>> jobsOnCores = new ArrayList<>();
         jobsOnCores.add(new ArrayList<>());
-        jobsOnCores.get(0).add(0);
+        jobsOnCores.get(0).add(-2);
         jobsOnCores.add(new ArrayList<>());
-        jobsOnCores.get(1).add(0);
+        jobsOnCores.get(1).add(-2);
         Integer[] jobsFromConfig;
         int j = 0;
         for (int i = 0; i < D.size(); i++) {
             if (D.get(i) != 0) {
                 jobsFromConfig = configs.get(D.get(i));
                 if (jobsFromConfig.length == 2) {
-                    if (jobsOnCores.get(CORE_NUMBER-2).get(jobsOnCores.get(CORE_NUMBER-2).size()-1) != jobsFromConfig[0] && 
+                    if (jobsOnCores.get(CORE_NUMBER-2).get(jobsOnCores.get(CORE_NUMBER-2).size()-1) != jobsFromConfig[0] &&
                         jobsOnCores.get(CORE_NUMBER-2).get(jobsOnCores.get(CORE_NUMBER-2).size()-1) != jobsFromConfig[1] &&
-                        jobsOnCores.get(CORE_NUMBER-1).get(jobsOnCores.get(CORE_NUMBER-1).size()-1) != jobsFromConfig[0] && 
+                        jobsOnCores.get(CORE_NUMBER-1).get(jobsOnCores.get(CORE_NUMBER-1).size()-1) != jobsFromConfig[0] &&
                         jobsOnCores.get(CORE_NUMBER-1).get(jobsOnCores.get(CORE_NUMBER-1).size()-1) != jobsFromConfig[1]) {
                             jobsOnCores.get(CORE_NUMBER-2).add(jobsFromConfig[0]);
                             jobsOnCores.get(CORE_NUMBER-1).add(jobsFromConfig[1]);
                     }
                     else {
-                        if      (jobsOnCores.get(CORE_NUMBER-2).get(jobsOnCores.get(CORE_NUMBER-2).size()-1) == jobsFromConfig[0]) { jobsOnCores.get(CORE_NUMBER-1).add(jobsFromConfig[1]); } 
+                        if      (jobsOnCores.get(CORE_NUMBER-2).get(jobsOnCores.get(CORE_NUMBER-2).size()-1) == jobsFromConfig[0]) { jobsOnCores.get(CORE_NUMBER-1).add(jobsFromConfig[1]); }
                         else if (jobsOnCores.get(CORE_NUMBER-2).get(jobsOnCores.get(CORE_NUMBER-2).size()-1) == jobsFromConfig[1]) { jobsOnCores.get(CORE_NUMBER-1).add(jobsFromConfig[0]); }
                         else if (jobsOnCores.get(CORE_NUMBER-1).get(jobsOnCores.get(CORE_NUMBER-1).size()-1) == jobsFromConfig[0]) { jobsOnCores.get(CORE_NUMBER-2).add(jobsFromConfig[1]); }
                         else if (jobsOnCores.get(CORE_NUMBER-1).get(jobsOnCores.get(CORE_NUMBER-1).size()-1) == jobsFromConfig[1]) { jobsOnCores.get(CORE_NUMBER-2).add(jobsFromConfig[0]); }
                     }
                 }
                 if (jobsFromConfig.length == 1) {
-                    if (jobsOnCores.get(CORE_NUMBER-2).get(jobsOnCores.get(CORE_NUMBER-2).size()-1) != jobsFromConfig[0] && 
+                    if (jobsOnCores.get(CORE_NUMBER-2).get(jobsOnCores.get(CORE_NUMBER-2).size()-1) != jobsFromConfig[0] &&
                         jobsOnCores.get(CORE_NUMBER-1).get(jobsOnCores.get(CORE_NUMBER-1).size()-1) != jobsFromConfig[0]) {
                             jobsOnCores.get(CORE_NUMBER-2).add(jobsFromConfig[0]);
                             jobsOnCores.get(CORE_NUMBER-1).add(-1);
@@ -150,7 +241,14 @@ public class LocalSearch {
                 j+=1;
             }
         }
-        return jobsOnCores;
+        List<List<Integer>> jobsOnCoresTrue = new ArrayList<>();
+        for(int i = 0; i < jobsOnCores.size(); i++) {
+            jobsOnCoresTrue.add(new ArrayList<>());
+            for (int k = 1; k < jobsOnCores.get(i).size(); k++) {
+                jobsOnCoresTrue.get(i).add(jobsOnCores.get(i).get(k));
+            }
+        }
+        return jobsOnCoresTrue;
     }
 
     public static List<Integer> jobsOnCoresToD(
