@@ -30,7 +30,7 @@ public class LocalSearch {
      * 3. Map<Integer, Integer[]> configs. 
      * Отображение номера конфигурации в номера работ, содержащихся в данной конфигурации.
      * 
-     * 4. double jobs[][]. Массив n массивов, где n - число ядер. 
+     * 4. List<List<Integer> jobs. Массив n массивов, где n - число ядер.
      * Каждый массив содержит номера работ в порядке их выполнения на процессоре.
      * Число -1 в массиве означает пустую работу, которая заканчивается в ближайшей точке событий.
      *
@@ -67,13 +67,14 @@ public class LocalSearch {
 
         for (ProblemInstance problemInstance : problemInstances) {
             List<List<Integer>> result = GreedyAlgorithm.buildSchedule(problemInstance);
-            List<List<Integer>> jobs = scheduleToJobs(result);
-            List<Integer> D = jobsOnCoresToD(jobs_orig, jobs, jobsSlowdown, configs);
-            List<Integer> locSearch = localSearch(jobs_orig, D, order, configs);
+//            List<List<Integer>> jobs = scheduleToJobs(result);
+//            List<Integer> D = jobsOnCoresToD(jobs_orig, jobs, jobsSlowdown, configs);
+            List<Integer> D = scheduleToD(result, configs);
+            List<Integer> locSearch = localSearch(jobs_orig, D, order, configs, jobsSlowdown);
             System.out.println(locSearch);
         }
     }
-    public static List<Integer> localSearch(Map<Integer, Integer> jobs_orig, List<Integer> D, double[][] order, Map<Integer, Integer[]> configs) {
+    public static List<Integer> localSearch(Map<Integer, Integer> jobs_orig, List<Integer> D, double[][] order, Map<Integer, Integer[]> configs, double[][] jobsSlowdown) {
         List<Integer> curOpt = new ArrayList<>(D);
         double curOptValue = evaluateSchedule(curOpt, jobs_orig, order, configs);
         List<Integer> bestNeighbor = null;
@@ -82,7 +83,7 @@ public class LocalSearch {
         boolean improved;
         do {
             improved = false;
-            List<List<Integer>> neighbors = generateNeighbors(curOpt, configs, order);
+            List<List<Integer>> neighbors = generateNeighbors(curOpt, configs, order, jobs_orig, jobsSlowdown);
 
             for (List<Integer> neighbor : neighbors) {
                 bestNeighborValue = evaluateSchedule(neighbor, jobs_orig, order, configs);
@@ -99,25 +100,87 @@ public class LocalSearch {
         return curOpt;
     }
 
-    private static List<List<Integer>> generateNeighbors(List<Integer> D, Map<Integer, Integer[]> configs, double[][] order) {
+    private static List<List<Integer>> generateNeighbors(
+            List<Integer> D,
+            Map<Integer, Integer[]> configs,
+            double[][] order,
+            Map<Integer, Integer> jobs_orig,
+            double[][] jobsSlowdown) {
+
         List<List<Integer>> neighbors = new ArrayList<>();
 
-        for (int i = 0; i < D.size(); i++) {
-            int currentConfig = D.get(i);
+        // Преобразуем расписание D в jobsOnCores
+        List<List<Integer>> jobsOnCores = dToJobs(jobs_orig, D, configs);
 
-            for (int newConfig : configs.keySet()) {
-                if (newConfig != currentConfig) {
-                    List<Integer> newD = new ArrayList<>(D);
-                    newD.set(i, newConfig);
+        int numCores = jobsOnCores.size();
 
-                    if (isValidSchedule(newD, order, configs)) {
-                        neighbors.add(newD);
+        for (int fromCore = 0; fromCore < numCores; fromCore++) {
+            for (int fromIdx = 0; fromIdx < jobsOnCores.get(fromCore).size(); fromIdx++) {
+                int jobA = jobsOnCores.get(fromCore).get(fromIdx);
+                if (jobA == -1) continue;
+
+                // Попробовать переместить работу на другое ядро или место
+                for (int toCore = 0; toCore < numCores; toCore++) {
+                    for (int toIdx = 0; toIdx <= jobsOnCores.get(toCore).size(); toIdx++) {
+
+                        // Пропустить если та же позиция
+                        if (fromCore == toCore && fromIdx == toIdx) continue;
+
+                        // Клонируем jobsOnCores
+                        List<List<Integer>> newJobs = deepCopy(jobsOnCores);
+
+                        // Удалим jobA из исходной позиции
+                        newJobs.get(fromCore).remove(fromIdx);
+
+                        // Вставим jobA в новую позицию
+                        if (toIdx > newJobs.get(toCore).size()) continue; // защита от выхода за границы
+                        newJobs.get(toCore).add(toIdx, jobA);
+
+                        // Преобразуем обратно в D
+                        List<Integer> newD = jobsOnCoresToD(jobs_orig, newJobs, jobsSlowdown, configs);
+
+                        // Проверка корректности порядка
+                        if (isValidSchedule(newD, order, configs)) {
+                            neighbors.add(newD);
+                        }
+                    }
+                }
+
+                // Попробовать обмен местами с другой работой
+                for (int toCore = fromCore; toCore < numCores; toCore++) {
+                    for (int toIdx = (toCore == fromCore ? fromIdx + 1 : 0); toIdx < jobsOnCores.get(toCore).size(); toIdx++) {
+                        int jobB = jobsOnCores.get(toCore).get(toIdx);
+                        if (jobB == -1) continue;
+
+                        // Копируем расписание
+                        List<List<Integer>> swappedJobs = deepCopy(jobsOnCores);
+
+                        // Меняем местами
+                        swappedJobs.get(fromCore).set(fromIdx, jobB);
+                        swappedJobs.get(toCore).set(toIdx, jobA);
+
+                        // Преобразуем обратно
+                        List<Integer> newD = jobsOnCoresToD(jobs_orig, swappedJobs, jobsSlowdown, configs);
+
+                        if (isValidSchedule(newD, order, configs)) {
+                            neighbors.add(newD);
+                        }
                     }
                 }
             }
         }
+
         return neighbors;
     }
+
+    private static List<List<Integer>> deepCopy(List<List<Integer>> original) {
+        List<List<Integer>> copy = new ArrayList<>();
+        for (List<Integer> list : original) {
+            copy.add(new ArrayList<>(list));
+        }
+        return copy;
+    }
+
 
     private static boolean isValidSchedule(List<Integer> D, double[][] order, Map<Integer, Integer[]> configs) {
         // Построим отображение <работа, время ее начала в D>
@@ -197,6 +260,24 @@ public class LocalSearch {
         }
         return jobsOnCores;
     }
+
+    public static List<Integer> scheduleToD(List<List<Integer>> schedule, Map<Integer, Integer[]> configs) {
+        List<Integer> D = new ArrayList<>();
+        for (int eventpoint = 0; eventpoint < schedule.size(); eventpoint++) {
+            Integer[] ep = new Integer[schedule.get(eventpoint).size()];
+            for (int i =0; i < ep.length; i++) {
+                ep[i] = schedule.get(eventpoint).get(i);
+            }
+            Arrays.sort(ep);
+            for(Map.Entry<Integer, Integer[]> entry: configs.entrySet()) {
+               if(Arrays.equals(ep, entry.getValue())) {
+                   D.add(entry.getKey());
+               }
+            }
+        }
+        return D;
+    }
+
 
     public static List<List<Integer>> dToJobs(Map<Integer, Integer> jobs_orig, List<Integer> D, Map<Integer, Integer[]> configs) {
         List<List<Integer>> jobsOnCores = new ArrayList<>();
