@@ -340,69 +340,73 @@ public class LocalSearch {
     ) {
         List<Integer> D = new ArrayList<>();
 
-        int[] taskIndices = new int[]{0, 0};
-        double[] remainingTimes = new double[2];
-        Integer[] currentTasks = new Integer[]{
-                jobsOnCores.get(0).get(0),
-                jobsOnCores.get(1).get(0)
-        };
+        int numCores = jobsOnCores.size();
+        int[] taskIndices = new int[numCores];
+        Integer[] currentTasks = new Integer[numCores];
+        double[] remainingTimes = new double[numCores];
 
-        // Начальные значения оставшегося времени
-        for (int core = 0; core < 2; core++) {
-            int task = currentTasks[core];
-            if (task != -1) {
-                int other = currentTasks[1 - core];
-                double slowdown = (other != -1) ? jobsSlowdown[task][other] : 1.0;
-                remainingTimes[core] = jobs_orig.get(task) / slowdown;
+        // Инициализация текущих задач и времени
+        for (int core = 0; core < numCores; core++) {
+            if (!jobsOnCores.get(core).isEmpty()) {
+                currentTasks[core] = jobsOnCores.get(core).get(0);
             } else {
-                remainingTimes[core] = 0;
+                currentTasks[core] = -1;
             }
         }
 
-        while (taskIndices[0] < jobsOnCores.get(0).size() || taskIndices[1] < jobsOnCores.get(1).size()) {
-            Integer[] config = new Integer[2];
-            config[0] = currentTasks[0];
-            config[1] = currentTasks[1];
+        while (true) {
+            boolean allDone = true;
+            for (int i = 0; i < numCores; i++) {
+                if (currentTasks[i] != -1) {
+                    allDone = false;
+                    break;
+                }
+            }
+            if (allDone) break;
 
-            double minTime = Double.MAX_VALUE;
-            for (double rt : remainingTimes) {
-                if (rt > 0 && rt < minTime) {
-                    minTime = rt;
+            // Обновляем оставшиеся времена, если они равны 0
+            for (int i = 0; i < numCores; i++) {
+                if (remainingTimes[i] <= 1e-9 && currentTasks[i] != -1) {
+                    int task = currentTasks[i];
+                    int other = currentTasks[1 - i];
+                    double slowdown = (other != -1) ? jobsSlowdown[task][other] : 1.0;
+                    if (slowdown == 0.0) slowdown = 1e-6;
+                    remainingTimes[i] = jobs_orig.get(task) / slowdown;
                 }
             }
 
-            int configId = findMatchingConfig(config, configs);
-            D.add(configId);
+            // Запоминаем текущую конфигурацию
+            Integer[] config = new Integer[numCores];
+            System.arraycopy(currentTasks, 0, config, 0, numCores);
+            D.add(findMatchingConfig(config, configs));
 
-            for (int i = 0; i < 2; i++) {
+            // Найти минимальное положительное время
+            double minTime = Double.MAX_VALUE;
+            for (double t : remainingTimes) {
+                if (t > 1e-9 && t < minTime) {
+                    minTime = t;
+                }
+            }
+
+            if (minTime == Double.MAX_VALUE) break; // ничего не выполняется, избегаем зацикливания
+
+            // Сдвигаем время
+            for (int i = 0; i < numCores; i++) {
                 if (remainingTimes[i] > 0) {
                     remainingTimes[i] -= minTime;
                 }
             }
 
-            for (int core = 0; core < 2; core++) {
-                if (remainingTimes[core] <= 1e-6) {
-                    taskIndices[core]++;
-                    if (taskIndices[core] < jobsOnCores.get(core).size()) {
-                        currentTasks[core] = jobsOnCores.get(core).get(taskIndices[core]);
+            // Обновляем завершённые задачи
+            for (int i = 0; i < numCores; i++) {
+                if (currentTasks[i] != -1 && remainingTimes[i] <= 1e-6) {
+                    taskIndices[i]++;
+                    if (taskIndices[i] < jobsOnCores.get(i).size()) {
+                        currentTasks[i] = jobsOnCores.get(i).get(taskIndices[i]);
+                        remainingTimes[i] = 0; // на следующей итерации пересчитаем
                     } else {
-                        currentTasks[core] = -1;
-                    }
-
-                    int task = currentTasks[core];
-                    if (task != -1) {
-                        int other = currentTasks[1 - core];
-                        double slowdown = (other != -1) ? jobsSlowdown[task][other] : 1.0;
-                        remainingTimes[core] = jobs_orig.get(task) / slowdown;
-                    } else {
-                        remainingTimes[core] = 0;
-                    }
-
-                    int other = 1 - core;
-                    int otherTask = currentTasks[other];
-                    if (otherTask != -1 && remainingTimes[other] > 0) {
-                        double slowdown = (currentTasks[core] != -1) ? jobsSlowdown[otherTask][currentTasks[core]] : 1.0;
-                        remainingTimes[other] = jobs_orig.get(otherTask) / slowdown;
+                        currentTasks[i] = -1;
+                        remainingTimes[i] = 0;
                     }
                 }
             }
@@ -410,6 +414,7 @@ public class LocalSearch {
 
         return D;
     }
+
 
     private static int findMatchingConfig(Integer[] config, Map<Integer, Integer[]> configs) {
         List<Integer> configList =  new ArrayList<>();
@@ -425,4 +430,61 @@ public class LocalSearch {
         }
         return 0; // Пустая конфигурация
     }
+
+    private static double calculateMakespan(
+            Map<Integer, Integer> jobs_orig,
+            List<List<Integer>> jobsOnCores,
+            double[][] jobsSlowdown) {
+
+        // Время завершения каждой работы
+        Map<Integer, Double> jobFinishTime = new HashMap<>();
+
+        // Текущее время на каждом ядре
+        double[] coreTime = new double[jobsOnCores.size()];
+
+        for (int core = 0; core < jobsOnCores.size(); core++) {
+            List<Integer> jobs = jobsOnCores.get(core);
+
+            for (int idx = 0; idx < jobs.size(); idx++) {
+                int job = jobs.get(idx);
+                if (job == -1) continue;
+
+                // Найти работу, параллельно выполняющуюся с текущей
+                int interferingJob = findParallelJob(jobsOnCores, core, idx);
+
+                // Вычислить замедление
+                double slowdown = 1.0;
+                if (interferingJob != -1) {
+                    slowdown = jobsSlowdown[job][interferingJob];
+                    if (slowdown == 0.0) slowdown = 1e-6; // защита от деления на 0
+                }
+
+                double duration = jobs_orig.get(job) / slowdown;
+
+                // Начало работы: после завершения предыдущей на ядре
+                double start = coreTime[core];
+                double finish = start + duration;
+
+                jobFinishTime.put(job, finish);
+                coreTime[core] = finish;
+            }
+        }
+
+        // Время завершения расписания = макс из всех окончаний
+        return jobFinishTime.values().stream().max(Double::compareTo).orElse(0.0);
+    }
+
+    private static int findParallelJob(List<List<Integer>> jobsOnCores, int core, int idx) {
+        for (int otherCore = 0; otherCore < jobsOnCores.size(); otherCore++) {
+            if (otherCore == core) continue;
+
+            List<Integer> jobs = jobsOnCores.get(otherCore);
+            if (idx < jobs.size()) {
+                int otherJob = jobs.get(idx);
+                if (otherJob != -1) return otherJob;
+            }
+        }
+        return -1;
+    }
+
 }

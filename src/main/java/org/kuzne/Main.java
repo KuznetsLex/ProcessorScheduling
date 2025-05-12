@@ -1,42 +1,51 @@
 package org.kuzne;
 
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
+import java.io.File;
+import java.io.IOException;
 import java.util.Map;
-
-
 public class Main {
     public static void main(String[] args) {
-        // D = {0,5,7,8,4}
-        // int[][] D = new int[][]{{1, 0, 0, 0, 0, 0, 0, 0, 0},{0, 0, 0, 0, 0, 1, 0, 0, 0},{0, 0, 0, 0, 0, 0, 0, 1, 0},{0, 0, 0, 0, 0, 0, 0, 0, 1},{0, 0, 0, 0, 1, 0, 0, 0, 0}};
-        // List<Integer> D = Arrays.asList(1, 0, 0, 0, 0, 0, 0, 0, 0,0, 0, 0, 0, 0, 1, 0, 0, 0,0, 0, 0, 0, 0, 0, 0, 1, 0,0, 0, 0, 0, 0, 0, 0, 0, 1,0, 0, 0, 0, 1, 0, 0, 0, 0);
-        List<Integer> D = Arrays.asList(5,7,8,4);
+        File inputFolder = new File("input");
 
-        Map<Integer, Integer> jobs_orig = new HashMap<>();
-        jobs_orig.put(0, 9951);  // 0       0       0       0
-        jobs_orig.put(1, 13206); // 3255    0       0       0
-        jobs_orig.put(2, 3831);  // 3831    576     0       0
-        jobs_orig.put(3, 4209);  // 4209    4209    3633    0
-
-        Map<Integer, Integer[]> configs = new HashMap<>();
-        configs.put(1, new Integer[]{0});
-        configs.put(2, new Integer[]{1});
-        configs.put(3, new Integer[]{2});
-        configs.put(4, new Integer[]{3});
-        configs.put(5, new Integer[]{0, 1});
-        configs.put(6, new Integer[]{0, 3});
-        configs.put(7, new Integer[]{1, 2});
-        configs.put(8, new Integer[]{2, 3});
-
-        List<List<Integer>> result = LocalSearch.dToJobs(jobs_orig, D, configs);
-        for (List<Integer> core : result) {
-            for (Integer job : core) {
-                System.out.print(job);
-                System.out.print(" ");
-            }
-            System.out.println();
+        if (!inputFolder.exists() || !inputFolder.isDirectory()) {
+            System.err.println("Папка 'input' не найдена.");
+            return;
         }
-        
+
+        File[] files = inputFolder.listFiles((dir, name) -> name.toLowerCase().endsWith(".txt"));
+        if (files == null || files.length == 0) {
+            System.err.println("Нет файлов .txt в папке 'input'.");
+            return;
+        }
+
+        for (File file : files) {
+            System.out.println("\n===== Чтение файла: " + file.getName() + " =====");
+
+            try {
+                InputData data = InputParser.readInputFile(file.getPath());
+
+                Map<Integer, Integer> jobs_orig = data.jobs_orig;
+                Map<Integer, Integer[]> configs = data.configs;
+                double[][] slowdown = data.slowdown;
+                double[][] order = data.order;
+
+                System.out.println("Работы: " + jobs_orig);
+                System.out.println("Конфигурации: " + configs.keySet());
+                System.out.println("Матрица slowdown: " + slowdown.length + "x" + slowdown[0].length);
+                System.out.println("Количество ограничений порядка: " + countOrderConstraints(order));
+
+            } catch (IOException e) {
+                System.err.println("Ошибка при обработке файла " + file.getName() + ": " + e.getMessage());
+            }
+        }
+    }
+
+    private static int countOrderConstraints(double[][] order) {
+        int count = 0;
+        for (double[] row : order)
+            for (double val : row)
+                if (val > 0)
+                    count++;
+        return count;
     }
 }
