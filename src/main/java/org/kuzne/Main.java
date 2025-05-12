@@ -2,7 +2,9 @@ package org.kuzne;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
+
 public class Main {
     public static void main(String[] args) {
         File inputFolder = new File("input");
@@ -28,11 +30,20 @@ public class Main {
                 Map<Integer, Integer[]> configs = data.configs;
                 double[][] slowdown = data.slowdown;
                 double[][] order = data.order;
+                List<List<Integer>> initialSchedule = data.initialSchedule;
 
-                System.out.println("Работы: " + jobs_orig);
-                System.out.println("Конфигурации: " + configs.keySet());
-                System.out.println("Матрица slowdown: " + slowdown.length + "x" + slowdown[0].length);
+                System.out.println("Работы: " + jobs_orig.size());
+                System.out.println("Конфигурации: " + configs.size());
                 System.out.println("Количество ограничений порядка: " + countOrderConstraints(order));
+
+                long startTime = System.nanoTime();
+                List<Integer> finalSchedule = LocalSearch.localSearch(data);
+                long endTime = System.nanoTime();
+
+                double durationMs = (endTime - startTime) / 1_000_000.0;
+                System.out.printf("Локальный поиск завершён за %.3f мс\n", durationMs);
+                System.out.println("Результирующее расписание: " + finalSchedule);
+//                System.out.println("Значение Cmax");
 
             } catch (IOException e) {
                 System.err.println("Ошибка при обработке файла " + file.getName() + ": " + e.getMessage());

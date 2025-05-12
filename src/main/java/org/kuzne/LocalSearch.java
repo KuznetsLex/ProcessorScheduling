@@ -38,25 +38,7 @@ public class LocalSearch {
      * Значение jobsSlowdown[i][j] - насколько замедляется i-тая работа при параллельной работе с j.
      */
     public static void main(String[] args) throws IOException {
-        Map<Integer, Integer> jobs_orig = new HashMap<>();
-        jobs_orig.put(0, 9951);
-        jobs_orig.put(1, 13206);
-        jobs_orig.put(2, 3831);
-        jobs_orig.put(3, 4209);
 
-        double[][] jobsSlowdown = { {1, 0.97, 0, 0.87}, {0.98, 1, 0.96, 0}, {0, 0.93, 1, 0.6}, {0.9, 0, 0.75, 1}};
-
-        Map<Integer, Integer[]> configs = new HashMap<>();
-        configs.put(1, new Integer[]{0});
-        configs.put(2, new Integer[]{1});
-        configs.put(3, new Integer[]{2});
-        configs.put(4, new Integer[]{3});
-        configs.put(5, new Integer[]{0, 1});
-        configs.put(6, new Integer[]{0, 3});
-        configs.put(7, new Integer[]{1, 2});
-        configs.put(8, new Integer[]{2, 3});
-
-        double[][] order = new double[][] {{2, 0}, {3, 1}};
 
         List<Path> paths = Files.walk(Paths.get("input")).collect(Collectors.toList());
         paths.removeFirst();
@@ -69,12 +51,18 @@ public class LocalSearch {
             List<List<Integer>> result = GreedyAlgorithm.buildSchedule(problemInstance);
 //            List<List<Integer>> jobs = scheduleToJobs(result);
 //            List<Integer> D = jobsOnCoresToD(jobs_orig, jobs, jobsSlowdown, configs);
-            List<Integer> D = scheduleToD(result, configs);
-            List<Integer> locSearch = localSearch(jobs_orig, D, order, configs, jobsSlowdown);
-            System.out.println(locSearch);
+//            List<Integer> D = scheduleToD(result, configs);
+//            List<Integer> locSearch = localSearch(jobs_orig, D, order, configs, jobsSlowdown);
+//            System.out.println(locSearch);
         }
     }
-    public static List<Integer> localSearch(Map<Integer, Integer> jobs_orig, List<Integer> D, double[][] order, Map<Integer, Integer[]> configs, double[][] jobsSlowdown) {
+    public static List<Integer> localSearch(InputData data) {
+        Map<Integer, Integer> jobs_orig = data.jobs_orig;
+        Map<Integer, Integer[]> configs = data.configs;
+        double[][] slowdown = data.slowdown;
+        double[][] order = data.order;
+        List<List<Integer>> initialSchedule = data.initialSchedule;
+        List<Integer> D = jobsOnCoresToD(jobs_orig, initialSchedule, slowdown, configs);
         List<Integer> curOpt = new ArrayList<>(D);
         double curOptValue = evaluateSchedule(curOpt, jobs_orig, order, configs);
         List<Integer> bestNeighbor = null;
@@ -83,7 +71,7 @@ public class LocalSearch {
         boolean improved;
         do {
             improved = false;
-            List<List<Integer>> neighbors = generateNeighbors(curOpt, configs, order, jobs_orig, jobsSlowdown);
+            List<List<Integer>> neighbors = generateNeighbors(curOpt, configs, order, jobs_orig, slowdown);
 
             for (List<Integer> neighbor : neighbors) {
                 bestNeighborValue = evaluateSchedule(neighbor, jobs_orig, order, configs);
